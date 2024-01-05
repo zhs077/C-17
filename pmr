@@ -1,0 +1,134 @@
+
+
+#include <memory_resource>
+#include <iostream>
+
+using DefaultResource = std::pmr::synchronized_pool_resource;
+DefaultResource gDefaultResource;
+
+using MemoryResourceBase = std::pmr::memory_resource;
+
+class MemoryResource final :  public MemoryResourceBase {
+public:
+    MemoryResource(std::pmr::memory_resource* mr = &gDefaultResource) 
+        : _resource(mr) { }
+
+private:
+    void* do_allocate(size_t bytes, size_t alignment) override {
+        return _resource->allocate(bytes, alignment);
+    }
+    void do_deallocate(void* p, size_t bytes, size_t alignment) override {
+        return _resource->deallocate(p, bytes, alignment);
+    }
+    bool do_is_equal(const MemoryResourceBase& other) const noexcept override {
+        return (this == &other);
+    }
+
+private:
+    std::pmr::memory_resource* _resource;
+};
+
+
+class StackResource final  : public MemoryResourceBase {
+public:
+    StackResource(size_t size = 1024, MemoryResourceBase* backup_resource = std::pmr::get_default_resource())
+        :_resource(size, backup_resource) { }
+
+private:
+    void* do_allocate(size_t bytes, size_t alignment) override {
+        return _resource.allocate(bytes, alignment);
+    }
+    void do_deallocate(void* p, size_t bytes, size_t alignment) override {
+        return _resource.deallocate(p, bytes, alignment);
+    }
+    bool do_is_equal(const MemoryResourceBase& other) const noexcept override {
+        return (this == &other);
+    }
+
+private:
+    std::pmr::monotonic_buffer_resource _resource;
+};
+
+
+
+template <class Type>
+class Allocator {
+public:
+    Allocator(MemoryResourceBase* resource) : _alloc(resource) {}
+    void deallocate(Type* p, size_t size) {
+        _alloc.deallocate(p, size);
+    }
+    Type* allocate(size_t size) {
+        return _alloc.allocate(size);
+    }
+
+private:
+    std::pmr::polymorphic_allocator<Type> _alloc;
+};
+
+
+StackResource sr;
+MemoryResource sr2;
+Allocator<char> alloc(&sr2);
+class A {
+public:
+    void* operator new(size_t size) {
+        std::cout << "size =" << size << "\n";
+        return alloc.allocate(size);
+
+    }
+
+    auto operator delete(void* p) -> void {
+        std::cout << "delete size =" << sizeof(A) << "\n";
+        alloc.deallocate((char*)p, sizeof(A));
+    }
+    auto operator new[](size_t size) -> void* {
+        std::cout << "size =" << size << "\n";
+
+        return alloc.allocate(size);
+    }
+        auto operator delete[](void* p, size_t size) -> void {
+        std::cout << " delete size =" << size << "\n";
+
+        alloc.deallocate((char*)(p), size);
+    }
+    void test() { std::cout << "i,j" << i << j << std::endl; }
+private:
+    int i;
+    bool j;
+};
+
+
+
+int main()
+{
+    A* obj = new A(); // 调用重载的new操作符，使用pmr进行内存分配
+    std::cout << obj << std::endl;
+    delete obj; // 释放对象的内存，使用pmr进行内存释放
+    int* p = new int(10);
+
+    A* a2 = new A(); // 调用重载的new操作符，使用pmr进行内存分配
+    std::cout << a2 << std::endl;
+    delete a2; // 释放对象的内存，使用pmr进行内存释放
+    MemoryResource  mm;
+    {
+        std::pmr::vector<int> vec{ };
+        for (int i = 0; i < 10; i++) {
+            vec.push_back(i);
+        }
+        for (auto& i : vec) {
+            std::cout << &i << std::endl;
+        }
+    }
+    char* c = new char[1024];
+    std::cout <<"\n";
+    {
+        std::pmr::vector<int> vec{ };
+        for (int i = 0; i < 10; i++) {
+            vec.push_back(i);
+        }
+        for (auto& i : vec) {
+            std::cout << &i << std::endl;
+        }
+    }
+}
